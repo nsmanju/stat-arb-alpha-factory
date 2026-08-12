@@ -4,103 +4,116 @@ import statsmodels.api as sm
 
 class OUProcess:
     """
-    Ornstein-Uhlenbeck process for mean-reversion speed
-    Answers: How fast does spread come back to mean?
-    Half-life = time to revert 50% back
+    Ornstein-Uhlenbeck for spread half-life
+    Formula: dX = theta*(mu - X)*dt + sigma*dW
+    Discrete: delta_X = alpha + beta*X_lag + error, beta = -theta*dt
+    Half-life = -ln(2)/beta
 
-   "What's typical half-life for crypto pairs?"
-    Answer: 2-10 days is tradable. <1 day = noise. >30 days = too slow.
+    HK use: If HL < 1 day -> too fast (costs kill you)
+            If HL > 30 days -> too slow (capital tie up)
+            Sweet spot: 2-10 days
     """
+
     def __init__(self, spread: pd.Series):
+        """
+        spread: cointegrated spread from cointegration.py
+        e.g., spread = ETH - beta*BTC
+        """
         self.spread = spread.dropna()
 
     def calc_half_life(self):
         """
-        OU: dS = theta*(mu - S)*dt + sigma*dW
-        We estimate theta from regression:
-        delta_spread = alpha + beta*spread_lag + error
+        Calculate half-life via OLS regression
 
-        beta = -theta*dt
-        half-life = -ln(2) / beta
+        Regression: delta_spread = alpha + beta*spread_lag
+        If beta < 0: mean-reverting (good)
+        If beta >=0: random walk / momentum (bad for stat-arb)
 
-        Returns: half-life in periods (if daily data -> days)
+        Returns: half_life, beta, is_mean_reverting
         """
-        # Lagged spread
+        # Lagged spread and delta
         spread_lag = self.spread.shift(1).dropna()
-        spread_ret = self.spread.diff().dropna()
+        delta_spread = self.spread.diff().dropna()
 
-        # Align
-        spread_lag = spread_lag.iloc[1:]
-        spread_ret = spread_ret.iloc[1:]
+        # Align lengths
+        # delta_spread is spread[t] - spread[t-1], so its index starts at 1
+        # spread_lag index also starts at 1
+        # Ensure same index
+        common_idx = spread_lag.index.intersection(delta_spread.index)
+        spread_lag = spread_lag.loc[common_idx]
+        delta_spread = delta_spread.loc[common_idx]
 
-        # Regression: spread_ret = alpha + beta*spread_lag
-        X = sm.add_constant(spread_lag)
-        model = sm.OLS(spread_ret, X).fit()
+        X = sm.add_constant(spread_lag) # const + lag
+        model = sm.OLS(delta_spread, X).fit()
 
-        beta = model.params[1] # Should be negative for mean-reversion
+        # FIXED for pandas 2.x
+        alpha = model.params.iloc[0]
+        beta = model.params.iloc[1] # Should be negative for mean-reversion
 
-        # If beta >=0 : not mean reverting!
-        if beta >= 0:
-            return {
-                'half_life': np.inf,
-                'beta': beta,
-                'is_mean_reverting': False,
-                'msg': 'Not mean-reverting (beta>=0)'
-            }
-
-        half_life = -np.log(2) / beta
+        # Half-life formula
+        if beta < 0:
+            half_life = -np.log(2) / beta
+            is_mean_reverting = True
+        else:
+            half_life = np.inf # No mean reversion
+            is_mean_reverting = False
 
         return {
-            'half_life': half_life, # e.g., 5.2 means 5.2 days to revert 50%
+            'half_life': half_life,
             'beta': beta,
-            'alpha': model.params[0],
-            'is_mean_reverting': True,
-            'theta': -beta, # OU theta
+            'alpha': alpha,
+            'is_mean_reverting': is_mean_reverting,
+            'model': model # For t-stat check
         }
 
-    def get_trading_rule(self, entry_z=2.0, exit_z=0.5):
+    def calc_ou_params(self):
         """
-        Simple rule based on OU
-        entry_z=2: Enter when |z|>2
-        exit_z=0.5: Exit when |z|<0.5 (back to mean)
-
-        Half-life used for holding period estimate
+        Full OU params: mu, theta, sigma
+        For interview: mu=long-term mean, theta=speed, sigma=vol
         """
         hl_info = self.calc_half_life()
-        hl = hl_info['half_life']
+        beta = hl_info['beta']
+        alpha = hl_info['alpha']
 
-        # Z-score
-        mean = self.spread.rolling(20).mean()
-        std = self.spread.rolling(20).std()
-        z = (self.spread - mean) / std
+        theta = -beta # Mean reversion speed
+        mu = -alpha / beta if beta!= 0 else self.spread.mean() # Long-term mean
 
-        # Signals
-        long_entry = z < -entry_z # Spread too low -> long spread
-        short_entry = z > entry_z # Spread too high -> short spread
-        exit_signal = abs(z) < exit_z
+        # Sigma from residuals
+        spread_lag = self.spread.shift(1).dropna()
+        delta_spread = self.spread.diff().dropna()
+        common_idx = spread_lag.index.intersection(delta_spread.index)
+        spread_lag = spread_lag.loc[common_idx]
+        delta_spread = delta_spread.loc[common_idx]
 
-        return pd.DataFrame({
-            'spread': self.spread,
-            'zscore': z,
-            'long_entry': long_entry,
-            'short_entry': short_entry,
-            'exit': exit_signal,
-            'half_life': hl
-        })
+        X = sm.add_constant(spread_lag)
+        model = sm.OLS(delta_spread, X).fit()
+        resid_std = model.resid.std()
+        sigma = resid_std # Approx
+
+        return {
+            'mu': mu,
+            'theta': theta,
+            'sigma': sigma,
+            'half_life': hl_info['half_life']
+        }
 
 # --- TEST ---
 if __name__ == "__main__":
-    # Simulate mean-reverting spread with hl ~ 5 days
+    # Simulate OU spread: mean=0, half-life ~ 5 days
     np.random.seed(42)
-    n = 200
+    n = 500
     spread = [0]
-    theta = 0.15 # ~ hl 4.6 days
+    theta = 0.13 # -> HL = ln2/theta ~5.3 days
     for i in range(1, n):
         spread.append(spread[-1] + theta*(0-spread[-1]) + np.random.randn()*0.5)
 
     spread = pd.Series(spread)
+
     ou = OUProcess(spread)
     info = ou.calc_half_life()
-    print(f"Half-life: {info['half_life']:.2f} periods")
+    params = ou.calc_ou_params()
+
+    print(f"Half-life: {info['half_life']:.2f} days (Target 2-10)")
+    print(f"Beta: {info['beta']:.4f} (should be <0)")
     print(f"Mean-reverting? {info['is_mean_reverting']}")
-    # Tradable if 1 < hl < 20
+    print(f"OU Params: mu={params['mu']:.3f}, theta={params['theta']:.3f}, sigma={params['sigma']:.3f}")
