@@ -19,3 +19,10 @@ python src/backtest.py
 python src/alpha_factory.py
 
 Author: Nadkalpur Manjunath
+
+## Visuals
+### OU Mean Reversion HL=4.76 days
+![OU](notebooks/images/ou_diagram.png)
+
+### Walk-forward Equity (No Lookahead)
+![Equity](notebooks/images/sharpe_equity.png)
