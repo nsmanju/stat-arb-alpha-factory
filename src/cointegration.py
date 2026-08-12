@@ -6,7 +6,7 @@ from statsmodels.tsa.stattools import coint
 class CointegrationTest:
     """
     Engle-Granger 2-step cointegration for stat-arb pairs
-     "How do you test if BTC and ETH are cointegrated?"
+    HK interview favorite: "How do you test if BTC and ETH are cointegrated?"
     Answer: This file
     """
 
@@ -46,12 +46,14 @@ class CointegrationTest:
         Residual = spread = tradable
 
         Example: BTC = 1.5 * ETH + spread. Hedge: Long 1 BTC, Short 1.5 ETH
+        FIX: Use.iloc for pandas 2.x compatibility
         """
         X = sm.add_constant(self.price_x) # Add intercept
         model = sm.OLS(self.price_y, X).fit()
 
-        alpha = model.params[0] # Intercept
-        beta = model.params[1] # Hedge ratio
+        # FIXED:.iloc for pandas 2.x (was model.params[0] which fails in pandas 2.x)
+        alpha = model.params.iloc[0] # Intercept
+        beta = model.params.iloc[1] # Hedge ratio
 
         # Spread = y - (alpha + beta*x) = stationary if cointegrated
         spread = self.price_y - (alpha + beta * self.price_x)
