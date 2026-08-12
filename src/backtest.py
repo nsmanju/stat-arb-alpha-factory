@@ -37,7 +37,7 @@ class OUProcess:
         X = sm.add_constant(spread_lag)
         model = sm.OLS(spread_ret, X).fit()
 
-        beta = model.params[1] # Should be negative for mean-reversion
+        beta = model.params.iloc[1] # Should be negative for mean-reversion
 
         # If beta >=0 : not mean reverting!
         if beta >= 0:
@@ -53,7 +53,7 @@ class OUProcess:
         return {
             'half_life': half_life, # e.g., 5.2 means 5.2 days to revert 50%
             'beta': beta,
-            'alpha': model.params[0],
+            'alpha': model.params.iloc[0],
             'is_mean_reverting': True,
             'theta': -beta, # OU theta
         }
