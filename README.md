@@ -25,7 +25,7 @@ python src/alpha_factory.py
 - src/backtest_commented.py: Sharpe 2.44, PnL 10.98 (exit |z|<0.5)
 
 ### Key Concept: pos = action verb position
-- spread = thing (Rs.5.2) = y - beta*x
+- spread = thing ($5.20) = y - beta*x
 - pos = what you DO: -1 SHORT, 0 FLAT, 1 LONG
 - pos.ffill() = hold position
 - pos.shift(1) = no lookahead bias
