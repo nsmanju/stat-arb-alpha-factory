@@ -15,7 +15,6 @@ z = CointegrationTest(x,y).get_spread_zscore(window=20)
 
 print(f"beta={hedge['beta']:.2f}")
 
-breakpoint()
 
 bt = Backtest(spread, z)
 print(bt.summary())
